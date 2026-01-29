@@ -1,0 +1,26 @@
+#!/bin/zsh
+
+# ---------------------------------------------------------------------
+# Developer launcher script to ensure that we don't use overridden Vk libs
+# ---------------------------------------------------------------------
+
+set -euo pipefail
+
+SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+SCRIPTDIR="$(cd "$(dirname "$0")" && pwd)"
+
+# hard reset Vulkan environment
+unset VK_DRIVER_FILES
+unset VK_ICD_FILENAMES
+unset VK_LAYER_PATH
+unset VULKAN_SDK
+
+# use bundled vulkan runtime (TODO: support bundle?)
+export VK_ICD_FILENAMES="$SCRIPTDIR/MoltenVK_icd.json"
+export VK_LAYER_PATH="$SCRIPTDIR/explicit_layer.d"
+
+# TODO: check executable file existance
+
+# configure file here
+exec "@AVK_TARGET_FILE@" "$@"
+

@@ -1,0 +1,12 @@
+# mac stuff
+.DS_Store
+
+# cmake stuff
+cmake-build-*
+
+# vim stuff
+*.swp
+
+# my stuff
+extract-test/
+

@@ -1,0 +1,23 @@
+#version 450
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 2, std140) uniform UniformBuffer
+{
+    float _m0;
+} scalar_a;
+
+layout(set = 0, binding = 0, std430) buffer InputBuffer
+{
+    float _m0[];
+} data_in;
+
+layout(set = 0, binding = 1, std430) buffer data_out
+{
+    float _m0[];
+} data_out_1;
+
+void main()
+{
+    data_out_1._m0[gl_GlobalInvocationID.x] = (scalar_a._m0 * data_in._m0[gl_GlobalInvocationID.x]) + data_out_1._m0[gl_GlobalInvocationID.x];
+}
+

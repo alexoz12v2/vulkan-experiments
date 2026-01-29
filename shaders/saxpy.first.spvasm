@@ -1,0 +1,141 @@
+;; Compilation
+;;   spirv-as saxpy.first.spvasm -o saxpy.first.spv
+;; Validation
+;;   spirv-val saxpy.first.spv
+;; Disassembly (with OpName and with Raw Ids)
+;;   spirv-dis saxpy.first.spv -o saxpy.first.dis.spvasm
+;;   spirv-dis saxpy.first.spv -o saxpy.first.dis.spvasm --raw-id
+;; Translate to GLSL
+;;   spirv-cross saxpy.first.spv --vulkan-semantics --version 450 --output saxpy.g.comp
+;; ---------------------------------------------------------------------------------------------------------
+;; 1. Header and Capabilites
+;; ---------------------------------------------------------------------------------------------------------
+
+                OpCapability Shader
+%glsl_std_450 = OpExtInstImport "GLSL.std.450"
+                OpMemoryModel Logical GLSL450 ;; This restricts us to OpAccessChain.
+
+;; For OpEntryPoint, you must list all global variables that:
+;; are in storage classes like
+;; Input, Output, Uniform, StorageBuffer, UniformConstant, PushConstant
+;; and are accessed directly or indirectly by the entry point
+;; Built-ins like gl_GlobalInvocationId also count.
+OpEntryPoint GLCompute %main "main" 
+  %gl_GlobalInvocationId
+  %scalar_a
+  %data_in
+  %data_out
+
+;; must follow entry points
+;; local size
+OpExecutionMode %main LocalSize 1 1 1
+
+;; ---------------------------------------------------------------------------------------------------------
+;; 2. Debug Information (names for readability in the disassembly)
+;; ---------------------------------------------------------------------------------------------------------
+
+OpName %main "main"
+OpName %gl_GlobalInvocationId "gl_GlobalInvocationId"
+OpName %InputBuffer "InputBuffer"
+OpName %UniformBuffer "UniformBuffer"
+OpName %data_in "data_in"
+OpName %data_out "data_out"
+OpName %scalar_a "scalar_a"
+
+;; ---------------------------------------------------------------------------------------------------------
+;; 3. Decorations (Bindings, Offsets, Memory Layout
+;; ---------------------------------------------------------------------------------------------------------
+
+;; Decorate Global Invocation ID (built-in variables need to be explicitly declared and decorated. The list of Builtins for each OpCapability is in the documentation)
+OpDecorate %gl_GlobalInvocationId BuiltIn GlobalInvocationId
+
+;; Decorate Storagte Buffers (ArrayStride is required for Arrays)
+;; when in doubt, GMEM Buffers (Input, Output, StorageBuffer, PushConstant, Uniform, UniformConstant, CrossWorkgroup, ..) should be structs
+;; a struct needs to be decorated as a Block and each member needs its Offset
+OpDecorate %RuntimeArray ArrayStride 4 ;; array of single precision floats
+OpDecorate %InputBuffer Block
+OpMemberDecorate %InputBuffer 0 Offset 0
+OpDecorate %OutputBuffer Block
+OpMemberDecorate %OutputBuffer 0 Offset 0
+
+;; Decorate Uniform Buffer
+OpDecorate %UniformBuffer Block
+OpMemberDecorate %UniformBuffer 0 Offset 0
+
+;; Decorate Descriptor Sets and Bindings
+OpDecorate %data_in DescriptorSet 0
+OpDecorate %data_in Binding 0
+OpDecorate %data_out DescriptorSet 0
+OpDecorate %data_out Binding 1
+OpDecorate %scalar_a DescriptorSet 0
+OpDecorate %scalar_a Binding 2
+
+;; ---------------------------------------------------------------------------------------------------------
+;; 4. Type Definitions
+;; ---------------------------------------------------------------------------------------------------------
+  %void = OpTypeVoid
+  %func = OpTypeFunction %void
+ %float = OpTypeFloat 32
+  %uint = OpTypeInt 32 0
+%v3uint = OpTypeVector %uint 3
+
+;; Pointer types
+%_ptr_Input_v3uint = OpTypePointer Input %v3uint ;; gl_GlobalInvocationID
+%_ptr_Uniform_float = OpTypePointer Uniform %float
+%_ptr_Storage_float = OpTypePointer StorageBuffer %float
+
+;; Data Structures (convention: Pascal Case)
+;; - float[]
+%RuntimeArray = OpTypeRuntimeArray %float ;; runtime array has unbounded size
+
+;; - Storage Block { float[] }
+%InputBuffer = OpTypeStruct %RuntimeArray
+%OutputBuffer = OpTypeStruct %RuntimeArray
+
+;; - Uniform Block { float }
+%UniformBuffer = OpTypeStruct %float
+
+;; Variable Pointers
+%_ptr_Uniform_Block = OpTypePointer Uniform %UniformBuffer
+%_ptr_Storage_Block_In = OpTypePointer StorageBuffer %InputBuffer
+%_ptr_Storage_Block_Out = OpTypePointer StorageBuffer %OutputBuffer
+
+;; ---------------------------------------------------------------------------------------------------------
+;; 5. Global Variables
+;; ---------------------------------------------------------------------------------------------------------
+;; Note: I didn't specify an Execution mode for the LocalSize, hence 1 1 1 (default)
+;; kernel inputs/outputs
+%gl_GlobalInvocationId = OpVariable %_ptr_Input_v3uint Input              ;; i
+             %scalar_a = OpVariable %_ptr_Uniform_Block Uniform           ;; A
+              %data_in = OpVariable %_ptr_Storage_Block_In StorageBuffer  ;; X[i]
+             %data_out = OpVariable %_ptr_Storage_Block_Out StorageBuffer ;; Y[i] and A*X[i]+Y[i]
+;; Constants
+%uint_0 = OpConstant %uint 0
+
+;; ---------------------------------------------------------------------------------------------------------
+;; 6. Main Function
+;; ---------------------------------------------------------------------------------------------------------
+             %main = OpFunction %void None %func
+
+  ;; Prepend all labels with label_*
+      %label_entry = OpLabel
+  ;; 1. Load the Global Invocation ID (x,y,z), .x
+           %id_vec = OpLoad %v3uint %gl_GlobalInvocationId
+               %id = OpCompositeExtract %uint %id_vec 0
+  ;; 2. Load scalar 'A' from Uniform Buffer
+            %a_ptr = OpAccessChain %_ptr_Uniform_float %scalar_a %uint_0
+                %a = OpLoad %float %a_ptr
+  ;; 3. Load X[i] from Input Buffer
+            %x_ptr = OpAccessChain %_ptr_Storage_float %data_in %uint_0 %id
+                %x = OpLoad %float %x_ptr
+  ;; 4. Load Y[i] from Input Buffer
+            %y_ptr = OpAccessChain %_ptr_Storage_float %data_out %uint_0 %id
+                %y = OpLoad %float %y_ptr
+  ;; 5. result = A * X + Y
+              %mul = OpFMul %float %a %x
+           %result = OpFAdd %float %mul %y
+  ;; 6. Store result into Y[i]
+                     OpStore %y_ptr %result
+                     OpReturn ;; block Terminator
+
+                     OpFunctionEnd
