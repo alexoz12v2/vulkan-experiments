@@ -51,19 +51,56 @@ find_package(glslang CONFIG REQUIRED)
 ## VMA
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 
+## SpirV reflect
+### How'd you find this? <vcpkg-root>/installed/<triplet>/share/unofficial-spirv-reflect/
+find_package(unofficial-spirv-reflect CONFIG REQUIRED)
+
 # apple specific: find vulkan libs
 ## TODO: If VULKAN_SDK detected, prefer developer's local installation. otherwise
 ##  use vcpkg downloaded + manually fetched stuff. The result in the build-tree should
 ##  be the same.
 if (APPLE)
+  # TODO: enumerate files
+  set(DYLIB_FILES
+    "${CMAKE_BINARY_DIR}/vulkan/icd.d/MoltenVK_icd.json"
+    "${CMAKE_BINARY_DIR}/vulkan/lib/libMoltenVK.dylib"
+    "${CMAKE_BINARY_DIR}/vulkan/lib/libVkLayer_khronos_validation.dylib"
+    "${CMAKE_BINARY_DIR}/vulkan/lib/libvulkan.dylib")
+  set(DOWNLOAD_DYLIB OFF)
+  foreach (f ${DYLIB_FILES})
+    if (NOT EXISTS "${f}")
+      set(DOWNLOAD_DYLIB ON)
+    endif ()
+  endforeach ()
+
   # assuming macos and not ios. If ios support needed, switch on the target triplet
   # assuming VulkanSDK Locally installed. If not, manual download of moltenVk needed
-  execute_process(
-    COMMAND zsh "${CMAKE_SOURCE_DIR}/prepare_build_vulkan_macos.sh" "${CMAKE_BINARY_DIR}"
-    COMMAND_ECHO STDOUT
-    COMMAND_ERROR_IS_FATAL ANY
-  )
+  if (DOWNLOAD_DYLIB)
+    execute_process(
+      COMMAND zsh "${CMAKE_SOURCE_DIR}/prepare_build_vulkan_macos.sh" "${CMAKE_BINARY_DIR}"
+      COMMAND_ECHO STDOUT
+      COMMAND_ERROR_IS_FATAL ANY
+    )
+  else ()
+    message(STATUS "[MacOS Vk Build] Detected Vulkan library files from previous execution. Skipping MoltenVK Download")
+  endif ()
 endif ()
+
+# add copy shader targets
+function (avk_add_copy_shader target)
+  # cmake_parse_arguments is built-in from 3.5, before was in module CMakeParseArguments
+  cmake_parse_arguments(PARSE_ARGV 0 arg "" "" "SHADERS")
+  if (TARGET ${target})
+    add_custom_target(${target}-copy_shaders ALL
+      COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/shaders"
+      COMMAND ${CMAKE_COMMAND} -E copy ${arg_SHADERS} "$<TARGET_FILE_DIR:${target}>/shaders"
+      USES_TERMINAL # uses the console pool on ninja generator
+    )
+    add_dependencies(${target} ${target}-copy_shaders)
+  else ()
+    message(FATAL_ERROR "TARGET ${target} doesn't exist")
+  endif ()
+endfunction ()
 
 # add exercises
 add_executable(avkex-saxpy)
@@ -74,10 +111,18 @@ set_target_properties(avkex-saxpy PROPERTIES
 target_sources(avkex-saxpy PRIVATE 
   main.cpp avkex-instance.cpp avkex-device.cpp 
   avkex-functions.cpp avkex-commandbuffers.cpp
-  avkex-discardpool.cpp
+  avkex-discardpool.cpp avkex-os.cpp
+  avkex-pipelines.cpp avkex-shader.cpp
 )
-target_include_directories(avkex-saxpy PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(avkex-saxpy PRIVATE volk::volk_headers GPUOpen::VulkanMemoryAllocator)
+target_include_directories(avkex-saxpy PRIVATE 
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  ## fix relative includes from vcpkg stuff, why isn't it automatic?
+  "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}"
+)
+target_link_libraries(avkex-saxpy PRIVATE volk::volk_headers GPUOpen::VulkanMemoryAllocator unofficial::spirv-reflect)
+avk_add_copy_shader(avkex-saxpy SHADERS
+  "${CMAKE_SOURCE_DIR}/shaders/saxpy.first.spv"
+)
 
 set(AVKEX_SAXPY_DEFINES "")
 if (CMAKE_BUILD_TYPE STREQUAL Debug)
@@ -93,12 +138,6 @@ endif ()
 
 if (APPLE)
   set(AVK_LAUNCHER_SCRIPT "$<TARGET_FILE_DIR:avkex-saxpy>/run-avkex-saxpy.sh")
-  # TODO: enumerate files
-  set(DYLIB_FILES
-    "${CMAKE_BINARY_DIR}/vulkan/icd.d/MoltenVK_icd.json"
-    "${CMAKE_BINARY_DIR}/vulkan/lib/libMoltenVK.dylib"
-    "${CMAKE_BINARY_DIR}/vulkan/lib/libVkLayer_khronos_validation.dylib"
-    "${CMAKE_BINARY_DIR}/vulkan/lib/libvulkan.dylib")
 
   add_custom_command(TARGET avkex-saxpy POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${DYLIB_FILES} $<TARGET_FILE_DIR:avkex-saxpy>

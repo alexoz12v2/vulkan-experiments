@@ -1,7 +1,13 @@
 ;; Compilation
 ;;   spirv-as saxpy.first.spvasm -o saxpy.first.spv
+;; Compilation (Under Vulkan 1.1)
+;;   spirv-as saxpy.first.spvasm -o saxpy.first.spv --target-env vulkan1.1
+;; Compilation (Under Vulkan 1.1, SPIR-V 1.4 (extension VK_KHR_spirv_1_4))
+;;   spirv-as saxpy.first.spvasm -o saxpy.first.spv --target-env vulkan1.1spv1.4
 ;; Validation
 ;;   spirv-val saxpy.first.spv
+;; Validation (Under Vulkan 1.1)
+;;   spirv-val saxpy.first.spv --relax-block-layout --uniform-buffer-standard-layout --target-env vulkan1.1
 ;; Disassembly (with OpName and with Raw Ids)
 ;;   spirv-dis saxpy.first.spv -o saxpy.first.dis.spvasm
 ;;   spirv-dis saxpy.first.spv -o saxpy.first.dis.spvasm --raw-id

@@ -6,6 +6,8 @@
 #include <volk.h>
 #include <vk_mem_alloc.h> // must come after volk
 
+#include <spirv_reflect.h>
+
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -14,15 +16,33 @@
 namespace avkex {
 
 enum class EVulkanOptionalExtensionSupport : uint64_t {
-  MemoryBudget = 1 << 0
+  MemoryBudget = static_cast<uint64_t>(1) << 0,
+  DedicatedAllocation = static_cast<uint64_t>(1) << 1,
 };
+using VulkanExtBits = std::underlying_type_t<EVulkanOptionalExtensionSupport>;
 
-constexpr inline std::underlying_type_t<EVulkanOptionalExtensionSupport> operator&(EVulkanOptionalExtensionSupport a, EVulkanOptionalExtensionSupport b) { return static_cast<std::underlying_type_t<EVulkanOptionalExtensionSupport>>(a) & static_cast<std::underlying_type_t<EVulkanOptionalExtensionSupport>>(b); }
+constexpr inline VulkanExtBits operator&(
+ EVulkanOptionalExtensionSupport a, EVulkanOptionalExtensionSupport b) {
+  return static_cast<VulkanExtBits>(a) & static_cast<VulkanExtBits>(b); 
+}
+
+constexpr inline EVulkanOptionalExtensionSupport operator|(
+ EVulkanOptionalExtensionSupport a, EVulkanOptionalExtensionSupport b) {
+  return static_cast<EVulkanOptionalExtensionSupport>(
+    static_cast<VulkanExtBits>(a) | static_cast<VulkanExtBits>(b));
+}
+
+constexpr inline EVulkanOptionalExtensionSupport& operator|=(
+ EVulkanOptionalExtensionSupport& a, EVulkanOptionalExtensionSupport b) {
+  a = a | b;
+  return a;
+}
 
 struct VulkanPhysicalDeviceQueryResult {
   operator bool() const { return score > 0; }
 
   bool hasMemoryBudgetExt() const { return optionalExtensions & EVulkanOptionalExtensionSupport::MemoryBudget; }
+  bool hasDedicatedAllocationExt() const { return optionalExtensions & EVulkanOptionalExtensionSupport::DedicatedAllocation; }
 
   EVulkanOptionalExtensionSupport optionalExtensions;
   // TODO can be modified in future for surface support on linux and windows
@@ -42,6 +62,7 @@ struct VulkanDeviceInfo {
 };
 
 std::vector<char const*> getVulkanMinimalRequiredDeviceExtensions();
+std::vector<char const*> getVulkanOptionalDeviceExtensions();
 bool handleRequiredDeviceFeatures(VkPhysicalDeviceFeatures2& features, bool checkMode);
 
 // implicitly singleton. If you try to instantiate multiple ones, it will silently fail.
@@ -59,7 +80,7 @@ class VulkanApp {
   operator bool() const { return m_instance; }
   VkInstance instance() const { return m_instance; }
 
-  std::vector<VulkanDeviceInfo> getEligibleDevices(std::function<VulkanPhysicalDeviceQueryResult(VkInstance,VkPhysicalDevice)> const& devValidator = s_defaultDeviceValidator) const;
+  std::vector<VulkanDeviceInfo> getEligibleDevices(bool sorted = true, std::function<VulkanPhysicalDeviceQueryResult(VkInstance,VkPhysicalDevice)> const& devValidator = s_defaultDeviceValidator) const;
 
  private:
   VkInstance m_instance = VK_NULL_HANDLE;
@@ -193,6 +214,44 @@ class VulkanCommandBufferManager {
 //   - allows for printf (debugPrintfEXT) inside shader. https://docs.vulkan.org/samples/latest/samples/extensions/shader_debugprintf/README.html
 //   - Using debug printf will consume a descriptor set, so if you use every last descriptor set it may not work and you may need to increase the set count at pool allocation.
 // - The WorkgroupSize was deprecated starting with version 1.6 in favor of using LocalSizeId. The main issue is Vulkan doesn't support LocalSizeId unless you have VK_KHR_maintenance4 or Vulkan 1.3+
+struct VulkanDescriptorSetLayoutData {
+  VkDescriptorSetLayoutCreateInfo createInfo;
+  uint32_t setNumber;
+  std::vector<VkDescriptorSetLayoutBinding> bindings;
+};
+std::vector<VulkanDescriptorSetLayoutData> reflectShaderDescriptors(SpvReflectShaderModule const& spvShaderModule);
+VkDescriptorSetLayout createDescriptorSetLayout(VulkanDevice& dev, VulkanDescriptorSetLayoutData const& setLayoutData);
+
+class VulkanShaderRegistryImpl;
+class VulkanShaderRegistry {
+ public:
+  // makes a copy
+  VulkanShaderRegistry(VulkanDevice* dev, size_t minCap = 64, size_t maxCap = 2048);
+  VulkanShaderRegistry(VulkanShaderRegistry const&) = delete;
+  VulkanShaderRegistry(VulkanShaderRegistry &&) noexcept = delete;
+  VulkanShaderRegistry& operator=(VulkanShaderRegistry const&) = delete;
+  VulkanShaderRegistry& operator=(VulkanShaderRegistry &&) noexcept = delete;
+  ~VulkanShaderRegistry() noexcept;
+
+  bool registerShader(std::string_view name, uint32_t const* pCode, uint32_t wordCount);
+  bool unregisterShader(std::string_view name);
+  bool withShader(std::string_view shader, std::function<void(VkShaderModule, SpvReflectShaderModule const&)> const& func) const;
+
+  bool registerShader(std::string_view name, std::vector<uint32_t>&& code) { return code.empty() ? false : registerShader(name, code.data(), static_cast<uint32_t>(code.size())); }
+
+ private:
+  VulkanDevice* m_dev = nullptr;
+  std::unique_ptr<VulkanShaderRegistryImpl> m_impl;
+};
+
+// Basic compute pipeline creation
+// - while spvShaderModule._internal->code_size exists, I prefer not relying on internal behaviour
+// - TODO: throw away reflection data once VkShaderModule is created
+VkPipelineLayout createPipelineLayout(VulkanDevice& dev, uint32_t setLayoutCount = 0, VkDescriptorSetLayout const* pSetLayouts = nullptr, uint32_t pushConstantRangeCount = 0, VkPushConstantRange const* pPushConstantRanges = nullptr);
+VkPipeline createComputePipeline(VulkanDevice& dev, VkPipelineLayout pipelineLayout, SpvReflectShaderModule const& spvShaderModule, VkShaderModule shaderModule);
+
+// Memory Management with VMA
 
 }
+
 

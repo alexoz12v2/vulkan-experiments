@@ -81,7 +81,10 @@ VulkanDevice::VulkanDevice(VkInstance instance, VulkanDeviceInfo const& devInfo)
   uniformBufferStandardLayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES;
   VkPhysicalDeviceVulkanMemoryModelFeatures vulkanMemoryModelFeatures{};
   vulkanMemoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+  VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilitySubsetFeatures{};
+  portabilitySubsetFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR;
 
+  uniformBufferStandardLayoutFeatures.pNext = &portabilitySubsetFeatures;
   bufferDeviceAddressFeatures.pNext = &uniformBufferStandardLayoutFeatures;
   timelineSemaphoreFeatures.pNext = &bufferDeviceAddressFeatures;
   vulkanMemoryModelFeatures.pNext = &timelineSemaphoreFeatures;
@@ -89,7 +92,13 @@ VulkanDevice::VulkanDevice(VkInstance instance, VulkanDeviceInfo const& devInfo)
   handleRequiredDeviceFeatures(features, false);
 
   // extensions
-  std::vector<char const*> const extensions = getVulkanMinimalRequiredDeviceExtensions();
+  std::vector<char const*> extensions = getVulkanMinimalRequiredDeviceExtensions();
+  if (devInfo.queryResult.hasMemoryBudgetExt()) {
+    extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+  }
+  if (devInfo.queryResult.hasDedicatedAllocationExt()) {
+    extensions.push_back(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
+  }
 
   // queues (TODO more generic? maybe?)
   float queuePriority = 1.f;
@@ -203,9 +212,10 @@ VmaAllocator createVmaAllocator(
   // maintenance4 is a required extension
   allocatorCreateInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE4_BIT;
 
-  // TODO Dedicated allocation
   if (optionalExtensions & EVulkanOptionalExtensionSupport::MemoryBudget)
     allocatorCreateInfo.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+  if (optionalExtensions & EVulkanOptionalExtensionSupport::DedicatedAllocation)
+    allocatorCreateInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT;
 
 #ifdef _WIN32
   allocatorCreateInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_EXTERNAL_MEMORY_WIN32_BIT;

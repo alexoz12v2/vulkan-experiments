@@ -18,13 +18,15 @@ namespace avkex {
 std::vector<char const*> getVulkanMinimalRequiredDeviceExtensions() {
   std::vector<char const*> requiredExtensions;
   requiredExtensions.reserve(64);
-  requiredExtensions.push_back(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+  requiredExtensions.push_back("VK_KHR_buffer_device_address");
   requiredExtensions.push_back(VK_KHR_UNIFORM_BUFFER_STANDARD_LAYOUT_EXTENSION_NAME);
   requiredExtensions.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
   requiredExtensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
   requiredExtensions.push_back(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
   requiredExtensions.push_back(VK_KHR_DESCRIPTOR_UPDATE_TEMPLATE_EXTENSION_NAME);
   requiredExtensions.push_back(VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
+  requiredExtensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME); // required by spirv 1.4
+  requiredExtensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME); // rg VK_KHR_SPIR -g '*.cpp' -g '*.h' --no-ignore
 #ifdef _WIN32
   requiredExtensions.push_back(VK_KHR_EXTERNAL_FENCE_WIN32_EXTENSION_NAME);
   requiredExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME);
@@ -46,6 +48,15 @@ std::vector<char const*> getVulkanMinimalRequiredDeviceExtensions() {
 #endif
 
   return requiredExtensions;
+}
+
+// kept in sync with `EVulkanOptionalExtensionSupport`
+std::vector<char const*> getVulkanOptionalDeviceExtensions() {
+  std::vector<char const*> optionalExtensions;
+  optionalExtensions.reserve(64);
+  optionalExtensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+  optionalExtensions.push_back(VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME);
+  return optionalExtensions;
 }
 
 bool handleRequiredDeviceFeatures(VkPhysicalDeviceFeatures2& features, bool checkMode) {
@@ -79,6 +90,13 @@ bool handleRequiredDeviceFeatures(VkPhysicalDeviceFeatures2& features, bool chec
           LOG_ERR << "Unsupported Device Feature: vulkanMemoryModel" <<  LOG_RST << std::endl;
           return false;
         }
+#ifdef __APPLE__
+       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR:
+        if (reinterpret_cast<VkPhysicalDeviceVulkanMemoryModelFeatures*>(currentType)->vulkanMemoryModel != VK_TRUE) {
+          LOG_ERR << "Unsupported Device Feature: vulkanMemoryModel" <<  LOG_RST << std::endl;
+          return false;
+        }
+#endif
         break;
        default: break;
       }
@@ -101,6 +119,11 @@ bool handleRequiredDeviceFeatures(VkPhysicalDeviceFeatures2& features, bool chec
        case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES:
         reinterpret_cast<VkPhysicalDeviceVulkanMemoryModelFeatures*>(currentType)->vulkanMemoryModel = VK_TRUE;
         break;
+#ifdef __APPLE__
+       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR:
+        reinterpret_cast<VkPhysicalDevicePortabilitySubsetFeaturesKHR*>(currentType)->events = VK_TRUE;
+        break;
+#endif
        default: break;
       }
     }

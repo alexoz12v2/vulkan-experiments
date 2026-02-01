@@ -69,7 +69,7 @@ VulkanApp::~VulkanApp() noexcept {
 }
 
 
-std::vector<VulkanDeviceInfo> VulkanApp::getEligibleDevices(std::function<VulkanPhysicalDeviceQueryResult(VkInstance,VkPhysicalDevice)> const& devValidator) const {
+std::vector<VulkanDeviceInfo> VulkanApp::getEligibleDevices(bool sorted, std::function<VulkanPhysicalDeviceQueryResult(VkInstance,VkPhysicalDevice)> const& devValidator) const {
   assert(*this);
   std::vector<VulkanDeviceInfo> result;
   std::vector<VkPhysicalDevice> eligibleDevices;
@@ -89,6 +89,11 @@ std::vector<VulkanDeviceInfo> VulkanApp::getEligibleDevices(std::function<Vulkan
     if (qResult) {
       result.push_back({physicalDevice, qResult});
     }
+  }
+  if (sorted && !result.empty()) {
+    std::sort(result.begin(), result.end(), [](VulkanDeviceInfo const& a, VulkanDeviceInfo const& b) {
+      return a.queryResult.score > b.queryResult.score;
+    });
   }
 
   return result;
@@ -271,6 +276,7 @@ VkBool32 VKAPI_PTR debugUtilsMessengerCallbackEXT(
 
 VulkanPhysicalDeviceQueryResult checkEligibleDevice(VkInstance instance, VkPhysicalDevice physicalDevice) {
   VulkanPhysicalDeviceQueryResult result{};
+  int32_t theScore = 1;
   // properties
   // - probably I'll be needing subgroup information
   VkPhysicalDeviceProperties2 props{};
@@ -356,13 +362,28 @@ VulkanPhysicalDeviceQueryResult checkEligibleDevice(VkInstance instance, VkPhysi
   AVK_VK_RST(vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &devExtCount, devExtProps.data()));
 
   std::vector<char const*> requiredExtensions = getVulkanMinimalRequiredDeviceExtensions();
+  std::vector<char const*> optionalExtensions = getVulkanOptionalDeviceExtensions();
   for (VkExtensionProperties const& ext : devExtProps) {
-    auto it = std::find_if(requiredExtensions.begin(), requiredExtensions.end(), [&ext](char const* name){ return strcmp(name, ext.extensionName) == 0; });
+    auto const strCompareExtensions = [&ext](char const* name){ return strcmp(name, ext.extensionName) == 0; };
+    auto it = std::find_if(requiredExtensions.begin(), requiredExtensions.end(), strCompareExtensions);
     if (it != requiredExtensions.end()) {
       requiredExtensions.erase(it);
-      if (requiredExtensions.empty())
-        break;
     }
+
+    auto optIt = std::find_if(optionalExtensions.begin(), optionalExtensions.end(), strCompareExtensions);
+    if (optIt != optionalExtensions.end()) {
+      if (strcmp(*optIt, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) == 0) {
+        result.optionalExtensions |= EVulkanOptionalExtensionSupport::MemoryBudget;
+        theScore += 100;
+      } else if (strcmp(*optIt, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0) {
+        result.optionalExtensions |= EVulkanOptionalExtensionSupport::DedicatedAllocation;
+        theScore += 100;
+      }
+      optionalExtensions.erase(optIt);
+    }
+
+    if (requiredExtensions.empty() && optionalExtensions.empty())
+      break;
   }
   if (!requiredExtensions.empty()) {
     LOG_ERR << "Unsupported Required Extensions:\n";
@@ -372,9 +393,6 @@ VulkanPhysicalDeviceQueryResult checkEligibleDevice(VkInstance instance, VkPhysi
     LOG_ERR << LOG_RST << std::flush;
     return result;
   }
-
-  // 2. Optional Extensions (TODO)
-  //  - memory budget, used by VMA
 
   // device features
   // compute positive score if still alive
@@ -392,7 +410,10 @@ VulkanPhysicalDeviceQueryResult checkEligibleDevice(VkInstance instance, VkPhysi
   uniformBufferStandardLayoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES;
   VkPhysicalDeviceVulkanMemoryModelFeatures vulkanMemoryModelFeatures{};
   vulkanMemoryModelFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES;
+  VkPhysicalDevicePortabilitySubsetFeaturesKHR portabilitySubsetFeatures{};
+  portabilitySubsetFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR;
 
+  vulkanMemoryModelFeatures.pNext = &portabilitySubsetFeatures;
   uniformBufferStandardLayoutFeatures.pNext = &vulkanMemoryModelFeatures;
   bufferDeviceAddressFeatures.pNext = &uniformBufferStandardLayoutFeatures;
   timelineFeatures.pNext = &bufferDeviceAddressFeatures;
@@ -402,8 +423,7 @@ VulkanPhysicalDeviceQueryResult checkEligibleDevice(VkInstance instance, VkPhysi
   if (!handleRequiredDeviceFeatures(features, true)) 
     return result;
 
-  // TODO
-  result.score = 1;
+  result.score = theScore;
 
   return result;
 }

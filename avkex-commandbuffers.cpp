@@ -89,7 +89,8 @@ VkCommandBuffer VulkanCommandBufferManagerImpl::getCommandBufferInternal(VulkanD
 
   // get current GPU progress
   uint64_t actualTimeline = 0;
-  AVK_VK_RST(vkApi->vkGetSemaphoreCounterValue(device, timelineSemaphore, &actualTimeline));
+  // since we chose a Vulkan1.1 instance, the populated function is the KHR one
+  AVK_VK_RST(vkApi->vkGetSemaphoreCounterValueKHR(device, timelineSemaphore, &actualTimeline));
 
   // 1. Try to find a reusable buffer in existing pools
   for (auto& poolPair : *poolsVector) {

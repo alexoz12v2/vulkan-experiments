@@ -6,6 +6,7 @@ cmake-build-*
 
 # vim stuff
 *.swp
+*.swo
 
 # my stuff
 extract-test/
