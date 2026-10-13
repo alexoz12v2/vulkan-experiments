@@ -11,12 +11,12 @@ avkInsertionSort:
     pushq   %rbp
     movq    %rsp, %rbp
 
-    // %r16 to r31 are temporary registers, push them
-    pushq   %r16  # counter 1
-    pushq   %r17  # counter 2
-    pushq   %r18
-    pushq   %r19
-    pushq   %r20
+    // %r12 to r31 are temporary registers, push them
+    pushq   %r12  # counter 1
+    pushq   %r13  # counter 2
+    pushq   %r14
+    pushq   %r15
+    pushq   %rbx
 
     // stack variables: -4(%rbp) = min
     //                  -8(%rbp) = min pos
@@ -25,69 +25,69 @@ avkInsertionSort:
     // total: 16 bytes
     subq    $16, %rsp  // apparently I'm using only 2 vars, I'm removing stack space when tested
 
-    xor     %r16, %r16
-    xor     %r17, %r17
-    xor     %r18, %r18
-    xor     %r19, %r19
+    xor     %r12, %r12
+    xor     %r13, %r13
+    xor     %r14, %r14
+    xor     %r15, %r15
 
     // for starting position to 0
 avkInsertionSort_startPositionLoop:
-    cmp     %edi, %r16d
+    cmp     %edi, %r12d
     jge     avkInsertionSort_cleanup
 
     // min <- list[starting position]
-    leaq    0(%rsi, %r16, 4), %r18  // r18 = starting_position (recycled as loop counter)
-    mov     0(%r18), %r19d          // r19d = min
-    mov     %r19d, -4(%rbp)
+    leaq    0(%rsi, %r12, 4), %r14  // r14 = starting_position (recycled as loop counter)
+    mov     0(%r14), %r15d          // r15d = min
+    mov     %r15d, -4(%rbp)
 
     // min pos <- starting position
-    mov     %r16d, -8(%rbp)
-    mov     %r16d, %r18d
+    mov     %r12d, -8(%rbp)
+    mov     %r12d, %r14d
 
-avkInsertionSort_startPositionLoop_sublistLoop:  // now r18d is loop counter
-    cmp     %edi, %r18d
+avkInsertionSort_startPositionLoop_sublistLoop:  // now r14d is loop counter
+    cmp     %edi, %r14d
     jge     avkInsertionSort_startPositionLoop_end
 
     // if min > number
-    mov     -4(%rbp), %r17d
-    leaq    0(%rsi, %r18, 4), %r19
-    mov     0(%r19), %r19d
+    mov     -4(%rbp), %r13d
+    leaq    0(%rsi, %r14, 4), %r15
+    mov     0(%r15), %r15d
 
-    cmp     %r19d, %r17d
+    cmp     %r15d, %r13d
     jl      avkInsertionSort_startPositionLoop_sublistLoop_endLoop
 
     // min <- number, min pos <- starting pos
-    mov     %r18d, -8(%rbp)
-    mov     %r19d, -4(%rbp)
+    mov     %r14d, -8(%rbp)
+    mov     %r15d, -4(%rbp)
 
 avkInsertionSort_startPositionLoop_sublistLoop_endLoop:
-    inc     %r18d
+    inc     %r14d
     jmp     avkInsertionSort_startPositionLoop_sublistLoop
     // end avkInsertionSort_startPositionLoop_sublistLoop
 
 avkInsertionSort_startPositionLoop_end:
-    // setting up swap function. r18 holds loop, expired, so free.
-    leaq    0(%rsi, %r16, 4), %r18
-    mov     0(%r18), %r19d   # tmp
-    mov     -4(%rbp), %r20d  # min
-    mov     %r20d, 0(%r18)
+    // setting up swap function. r14 holds loop, expired, so free.
+    leaq    0(%rsi, %r12, 4), %r14
+    mov     0(%r14), %r15d  # tmp
+    mov     -4(%rbp), %ebx  # min
+    mov     %ebx, 0(%r14)
 
-    mov     -8(%rbp), %r17d
-    leaq    0(%rsi, %r17, 4), %r18
-    mov     %r19d, 0(%r18)
+    mov     -8(%rbp), %r13d
+    leaq    0(%rsi, %r13, 4), %r14
+    mov     %r15d, 0(%r14)
 
     // outer loop cleanup
-    inc     %r16d
+    inc     %r12d
     jmp     avkInsertionSort_startPositionLoop
     // end avkInsertionSort_startPositionLoop
 
     // cleanup
 avkInsertionSort_cleanup:
-    popq    %r20
-    popq    %r19
-    popq    %r18
-    popq    %r17
-    popq    %r16
+    popq    %rbx
+    popq    %r15
+    popq    %r14
+    popq    %r13
+    popq    %r12
 
     leave
     ret

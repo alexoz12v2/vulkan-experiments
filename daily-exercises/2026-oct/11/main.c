@@ -38,4 +38,5 @@ static void printArray(int32_t const sz, int32_t const* const arr) {
   }
   putc(' ', stdout);
   putc(']', stdout);
+  putc('\n', stdout);
 }

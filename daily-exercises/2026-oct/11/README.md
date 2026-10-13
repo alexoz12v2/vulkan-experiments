@@ -144,3 +144,10 @@ and no assembly available whatsoever
 The only idea that comes to my mind is inspect the generated ELF file
 code sections and prey that I can find something.
 
+--- 
+
+Apparently, registers `%r16 - %r31` are available only for CPUs supporting the recent intel APX extension, which means that I need to replace them with lower numbers
+Need to check intel ABi to find out equivalent temporary registers to substitute
+
+Note: Today I'm on windows, therefore I'll be running from `wsl -d rhel9`
+
