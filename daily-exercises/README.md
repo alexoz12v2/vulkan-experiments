@@ -21,4 +21,7 @@ Repository collections for my daily challenged, which will result in a notes mar
 
 - 2026-10-11: any simple sorting algorithm in x86_64 assembly for linux abi. Testing criteria: Call it from C. Need to debug it at least once with GDB
   - tags: assembly, x86_64
+- 2026-10-14: insertion sort from the previous exercise, rewritten for aarch64, android abi. Testing Criteria: Call if from C and run it 
+  on your android phone. Debugging with packaged gdb (or lldb if Android SDK doesn't come with gdb).
+  - tags: assembly, mobile, arm
 
