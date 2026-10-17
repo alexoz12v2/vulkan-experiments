@@ -98,7 +98,7 @@ other types are
 
 ---
 
-Note ann Apploe assembly: `.type` and  `.size` **Are errros**, unknown directives, cause 
+Note ann Apploe assembly: `.type` and  `.size` **Are errors**, unknown directives, cause 
 - **Mach-O doesn't have symbol table with type and size**
 - leading underscore on a label tells Mach-O that a given symbol is a function
 
@@ -273,3 +273,186 @@ Gemini's summayr of common condition for conditional codes execution (eg `b.cond
 I'd use the APSR related name where applicable
 
 - [] TODO: write on paper a N == V example on why the math checks out
+
+--- 
+
+Building: I tried 
+
+```sh
+~/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
+  main.c insertion-sort.S 
+```
+
+and got a tons of errors, including `invalid instruction mnemonic pacibsp`
+
+That's because while clang enables Pointer Address Authentication for C compiled files,
+raw assembly goes through the assembler, which assumes `arm-v8-a` by defaault unless 
+you explicitly tell it that you want PAC, which is for `arm-v8.3-a` or newer. That 
+is not a problem because `pacibsp` is part of the HINT instruction address space, meaning 
+ignored if not recognized.
+
+Furthermore, we want to specify that we want `--target` as a `aarch64` android. Choose any 
+target android API level you want (Android 14 = level 34)
+- <https://apilevels.com/> reports that new apps and updates must be at least have 
+  `targetSdk` 36+. That doesn't mean that your app doesn't run on older phones. It 
+  declares the version you tested with.
+
+| Setting | What it does | Who cares |
+| - | - | - |
+| `minSdk` | Determines the *oldest Android version that can install the app* | Google play store to filter who can see the app |
+| `targetSdk` | tells OS which android version you tested agains, and therefore can apply That API's supported rules | OS of newer phones, and Google Play policy enforcers |
+| `compileSdk` | version of Android SDK with which your code is compiled with | developer and compiler |
+
+
+in code you can bridge the gap, with the following java/kotlin runtime check
+
+```java
+if (Build.VERSION_SDK_INT >= 36) {
+    // bank
+} else {
+    // something else
+}
+```
+
+or in native code 
+
+```C
+// rely on clang builtins
+if (__builtin_available(android 36, *)) {
+    // go
+} else {
+    // something else
+}
+
+// raw Android call
+#include <android/api-level.h>
+
+int current_api = android_get_device_api_level(); // -1 if fails
+if (current_api >= 36) {
+    // go
+} else {
+    // something else
+}
+```
+
+
+Ok, back  to compilation 
+
+--- 
+
+```sh
+clang --print-targets # just the first part of the triplets
+# target relative
+clang --target=aarch64-linux-android34 --print-supported-cpus # exact cpu specific optimization, not general arch
+```
+
+for seeing possible values for `--target=` and `--march=`
+
+```sh 
+~/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --target=aarch64-linux-android34 -march=armv8.3-a main.c insertion-sort.S
+```
+
+final compilation command. Now for transfering file on the device: <https://developer.android.com/tools/adb#copyfiles>
+
+---
+
+What claude code has to say about android's file system 
+
+- Android uses a Linux-based file system using `ext4` and `F2FS` (Flash-Friendly file system)
+  for its internal storage and `exFAT` and `FAT32` for removable SD cards
+- System partitions fundamental
+  - `/boot`: Kernel abnd RAM disk needed to start the device
+  - `/system`: Core operating system, pre-installed apps, GUI interface
+  - `/recovery`: recovery console and used for factory resets and updates
+  - `/data`: holds user-specific data, installed applications, databases, and system 
+    settings. to see requires superuser, otherwise you can see an application data using 
+    `run-as` to impersonate a given package
+  - `/cache`: Frequently accessed app data for performance are moved here. An app can
+    use it to its advantage with `getCacheDir()`.
+  - `/misc`: hardwar-specific settings
+  - `/sdcard`: Symbolic link or mount point to **shared user storage**
+  - `/sd-ext`: Extended storage partition occasionally used in custom roms
+
+For our purpose to execute a manually compiled ELF executable, what we need to know
+
+- we could put it in the Downloads folder `/sdcard/Download`, but it wouldn't be executable
+  - find the mount point of current directory (say download folder) with `df -P .`
+  - grep it inside `/proc/mounts`
+  - TODO: `grep -EnH "/storage/emulated" /proc/mounts` study its output, beyond scope of 
+    assembly exercise
+    - I found the Filesystem to be of type `fuse`, meaning Filesystem in Userspace, ie.
+      each file access goes through a user-space driver. This is how Scoped storage
+      is implemented for app
+    - there is the `noexec` flag in this mount, so I can't execute an ELF in the 
+      download folder
+
+`/data` is root only access, But the only part we can use is `/data/local/tmp`, which 
+belongs to the shell session.
+
+It still is contained in the **Opaque Binary Blob** (obb), which is for app related 
+storage, but we can access it. Can we query which obb belongs to "us"?
+
+```
+sunstone:/data $ ls
+ls: .: Permission denied
+1|sunstone:/data $ df -P .
+Filesystem       512-blocks     Used Available Capacity Mounted on
+/dev/block/dm-50  217083512 46877184 169944184      22% /storage/emulated/0/Android/obb
+sunstone:/data $ cd local/tmp
+sunstone:/data/local/tmp $ llllls
+/system/bin/sh: llllls: inaccessible or not found
+127|sunstone:/data/local/tmp $ ls
+APKPure_3.20.7803_apkpure.com.apk  sky.com.example.u_1_first.sha1
+sunstone:/data/local/tmp $ df -P .
+Filesystem       512-blocks     Used Available Capacity Mounted on
+/dev/block/dm-50  217083512 46886280 169935088      22% /storage/emulated/0/Android/obb
+```
+
+
+**Actually No**, `/data/local/tmp` does not belong or live inside **OBB**. This is an 
+artifact of **Android's Storage Sandbox namespaces**. Basically, the android shell 
+doesn't have permission to see the actual mountspace for `/data`. Therefore, it 
+falls back to the closest matching visible mount on the same physical partition,
+which is `/dev/block/dm-50`
+
+Cut it here, just run 
+
+```sh
+adb push a.out /data/local/tmp
+```
+
+---
+
+```
+❯ adb push a.out /data/local/tmp
+a.out: 1 file pushed, 0 skipped. 105.0 MB/s (7624 bytes in 0.000s)
+❯ adb shell 
+$ cd /data/local/tmp
+$ chmod +x a.out                                                                                                                                                                                                                                                                                      
+$ ./a.out
+Hello and welcome to Android ABI aarch64 insertion sort with assembly!
+  Before sorting: 
+[ 32, 4, 7, 18, 0, -4, 43, 32, 1 ]Illegal instruction
+```
+
+Alright, how in in debugging
+
+1. check if `a.out` has DWARF symbols
+  - `llvm-readelf a.out | grep debug`
+  - `llvm-dwarfdump --debug-info a.out | less`
+
+What I've executed 
+
+```sh
+~/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf \
+  -S a.out | grep debug
+```
+
+nothing, so I need to recompile by adding `-g -O0`
+
+```sh 
+ ~/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
+   --target=aarch64-linux-android34 -march=armv8.3-a -g -O0 main.c insertion-sort.S
+```
+
+
