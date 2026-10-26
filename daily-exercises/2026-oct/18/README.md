@@ -809,3 +809,150 @@ Consequences
 - Already-bound slots stay. If your executable's slot for foo pointed at library A, loading library B with another foo doesn't change it. Only later-loaded libraries can bind to RTLD_GLOBAL symbols.
 - dlclose and dangling slots: other modules' slots that were bound into a library you unload become dangling, so the loader typically keeps a library alive while anything depends on it.
 - Android: dlopen also obeys linker namespaces, so which libraries are visible depends on the caller's namespace.
+
+---
+
+I've run the exercise dotay, and lo and behold, we got 
+
+```
+// just noting what install told me about installation location
+• installationURL: file:///private/var/containers/Bundle/Application/227598C2-5602-498C-8F4F-9C7196263D76/cli.app/
+```
+
+```
+thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=257, address=0x14000000000002)
+    frame #0: 0x0000000000000002
+error: memory read failed for 0x2
+```
+
+so, we are trying to access basically a zero address/an index. Let me check the assembly around that address, Asking gemini the lldb commadn for it, probably dis?
+
+```
+disassemble --start-address 0x14000000000002 --count 20
+Failed to disassemble memory at 0x00000002.
+
+(lldb) disassemble --frame
+error: memory read failed for 0x2
+```
+
+I'm guessing the `lr` got corrupted? Placing a breakpoint at `ret` then.
+
+Claude Code: `dwarfdump --debug-line build/cli.dSYM | grep -i native-module` on the generated `dSYM` file (with `dsymutil`) doesn't have any line info for the `*.S` file, cause it wasn't recognized as a 
+translation unit, so `breakpoint set -n *` which takes a symbol name would work, but `breakpoint set -f * -l *` with file and line fails.
+
+- probably the problem is `.section __TEXT, __thecode, regular, pure_instructions`, because while it is valid Mach-O, clang doesn't recognize the standard `__text` section name, which is the one generated 
+with `.text`. so if I comment that out and write `.text` it should resolve? I still want to exercise about that though.
+
+Therefore set a breakpoint relative to a registered label, which we have thanks to the latest edits. So 
+
+```
+breakpoint set -n avkDocProduct_endFunction -R 20
+# -R = --address-slide
+```
+
+```
+cli`avkDocProduct_endFunction:
+->  0x10457c364 <+20>: ret
+
+cli`__stack_chk_fail:
+    0x10457c368 <+0>:  adrp   x16, 4
+    0x10457c36c <+4>:  ldr    x16, [x16]
+    0x10457c370 <+8>:  br     x16
+Target 0: (cli) stopped.
+(lldb) p $x30
+(unsigned long) 2
+(lldb) p $s0
+(float) 2.80259693E-45
+```
+
+So, both stack through prologue and epilogue is messed up, and the final result itself is wrong.
+
+I'd like to try to setup a `watchpoint`, which can monitor writes and reads to/from a particular address, say 
+
+```
+watchpoint set expression -w write -s 4 -- 0x16fdff0a8
+watchpoint set expression -w read_write -s 16 -- $sp+0x20
+watchpoint set expression -w read -- 0x16fdff0a8
+```
+
+```
+(lldb) p/x $x30
+(unsigned long) 0x000000010052c104
+```
+
+`(lldb) memory read -s8 -fx -c16 $sp`
+```
+0x16f8d7770: 0x0000000000000002 0x000000010052c401
+0x16f8d7780: 0x0000000000000019 0x00000001aaa24dc5
+0x16f8d7790: 0x000000016f8d7890 0x000000010052c104
+0x16f8d77a0: 0x0000000100941b90 0x000000010052c000
+0x16f8d77b0: 0x0000000100941d18 0x0000000100941910
+0x16f8d77c0: 0x0000000000000000 0x0000000000000000
+0x16f8d77d0: 0x000000000000003c 0x0000000208d88230
+0x16f8d77e0: 0x0000000a6f8d7800 0x000000016f8d784c
+```
+
+
+```
+sp ->     0x16f8d7770: 0x0000000000000002 
+          0x16f8d7778: 0x000000010052c401
+          0x16f8d7780: 0x0000000000000019 
+          0x16f8d7788: 0x00000001aaa24dc5
+x29 ->    0x16f8d7790: 0x000000016f8d7890 (x29)
+          0x16f8d7798: 0x000000010052c104 (x30)
+          0x16f8d77a0: 0x0000000100941b90 (x19)
+          0x16f8d77a8: 0x000000010052c000 (x20)
+          0x16f8d77b0: 0x0000000100941d18 (x21)
+          0x16f8d77b8: 0x0000000100941910 (x22)
+```
+
+Ok wait, I've added to `x29`(`fp`) instead of subtracting to it to access local variables. Retrying.
+Still overwriting. Provisioning profile, which can be generated either with `fastlane` (paid) or with a xcode 
+throwaway project
+
+```
+0x16f047770: 0x0000000000000002 0x0000000100dbc401
+0x16f047780: 0x0000000000000019 0x00000001aaa24dc5
+0x16f047790: 0x000000016f047890 0x0000000100dbc104
+0x16f0477a0: 0x00000001011d1b90 0x0000000100dbc000
+0x16f0477b0: 0x00000001011d1d18 0x00000001011d1910
+0x16f0477c0: 0x0000000000000000 0x0000000000000000
+0x16f0477d0: 0x000000000000003c 0x0000000208d88230
+0x16f0477e0: 0x0000000a6f047800 0x000000016f04784c
+
+(lldb) p/x $x30
+(unsigned long) 0x0000000100dbc104
+```
+So address to watch `0x16f047798`
+
+---
+
+Today (26 oct) nvim deleted my buffer, had to restore it with claude code, which could read where nvim stores its backups.
+
+Thing is, it also pointed out some issues, whatever, the exercise was almost done i guess? I've learned about watchpoints so ok.
+
+New attempt, printing stack after prologue
+
+`(lldb) memory read -s8 -fx -c16 $sp`
+```
+0x16b487770: 0x0000000000000002 0x000000010497c409
+0x16b487780: 0x0000000000000019 0x00000001aaa24dc5
+0x16b487790: 0x000000016b487890 0x000000010497c104 <- $x29, $x30
+0x16b4877a0: 0x0000000104d91b90 0x000000010497c000
+0x16b4877b0: 0x0000000104d91d18 0x0000000104d91910
+0x16b4877c0: 0x0000000000000000 0x0000000000000000
+0x16b4877d0: 0x000000000000003c 0x0000000208d88230
+0x16b4877e0: 0x0000000a6b487800 0x000000016b48784c
+```
+`p/x $x30`
+```
+(unsigned long) 0x000000010497c104
+```
+
+after the function the link register and frame chain seem to be preserved, what about if I try a `memory read` with 
+`-s4 -ffloat`? I can see 
+```
+0x16b487780: 682
+```
+
+Near, but not `680`

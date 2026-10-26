@@ -34,7 +34,10 @@ int main(void) {
   putc('\n', stdout);
 
   // Time to call our dot product function
+  puts("Calling avkDotProduct...\n");
   float const theDot = avkDotProduct(COUNT, arr1, arr2);
+  printf("The dot product between the two is [%.3f] expected [%.3f]\n", theDot,
+         680.f);
 #undef COUNT
 }
 
